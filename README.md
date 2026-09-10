@@ -1,8 +1,8 @@
 # Discord Reminder Bot
 
-Self-hosted Discord bot for tracking recurring life-admin dates — birthdays,
-car MOT, parking permits, anything with a "don't forget this" date — and
-getting reminders in Discord (and optionally by email) ahead of time.
+Self-hosted Discord bot for tracking recurring life-admin dates, such as birthdays,
+car checks, parking permits, anniversaries and anything with a "don't forget this" date.
+Reminders are set up and received via Discord (+ optionally by email) ahead of time.
 
 All interaction happens as Discord slash commands, no separate web UI:
 
@@ -16,7 +16,7 @@ All interaction happens as Discord slash commands, no separate web UI:
 
 Recurrence supports `once`, `yearly` (birthdays, MOT, permits) and `monthly`.
 Yearly handles Feb 29 birthdays sanely (falls back to Feb 28 on non-leap years).
-Reminders default to firing 7 days, 1 day, and on-the-day before an event —
+Reminders default to firing 7 days, 1 day, and on-the-day before an event,
 configurable per event via `advance_days`, e.g. `30,7,1,0`.
 
 ## 1. Create the Discord bot
@@ -38,13 +38,13 @@ cp .env.example .env
 ```
 
 Fill in `.env`:
-- `DISCORD_BOT_TOKEN` — from step 1.
-- `TIMEZONE` — e.g. `Europe/London`.
-- `DEFAULT_ADVANCE_DAYS` — default lead time(s) for new events, e.g. `7,1,0`.
-- Email (optional) — `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`.
+- `DISCORD_BOT_TOKEN`: from step 1.
+- `TIMEZONE`: e.g. `Europe/London`.
+- `DEFAULT_ADVANCE_DAYS`: default lead time(s) for new events, e.g. `7,1,0`.
+- Email (optional): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`.
   For Gmail: host `smtp.gmail.com`, port `465`, and an **App Password**
   (not your normal password) from <https://myaccount.google.com/apppasswords>.
-  **Put the password directly in your local `.env` file — never share it in chat, a
+  **Put the password directly in your local `.env` file, never share it in chat, a
   ticket, or anywhere else; `.env` is already git-ignored.**
 
 ## 3. Run
@@ -67,11 +67,11 @@ Then in Discord:
 
 Global slash commands can take up to ~1 hour to show up everywhere the first
 time. To iterate faster during setup, set `DISCORD_TEST_GUILD_ID` in `.env`
-to your server's ID — commands then register there instantly on restart.
+to your server's ID. Xommands then register there instantly on restart.
 
 ## Notes
 
-- Storage is a single SQLite file — fine for household-scale use, no external DB needed.
+- Storage is a single SQLite file (fine for household-scale use, no external DB needed).
 - The daily check runs once at `REMINDER_HOUR:REMINDER_MINUTE` in `TIMEZONE`. It's idempotent
   (won't double-send even if the bot restarts the same day).
 - Anyone in the server can add/list/remove events; `setchannel` and `setemails` require
