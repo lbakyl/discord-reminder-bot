@@ -31,14 +31,19 @@ def next_occurrence(event_date: date, recurrence: str, today: date) -> Optional[
         return event_date if event_date >= today else None
 
     if recurrence == "yearly":
-        candidate = safe_date(today.year, event_date.month, event_date.day)
+        # event_date's year is a floor, not just a month/day template: an
+        # event dated years in the future shouldn't start recurring early.
+        start_year = max(today.year, event_date.year)
+        candidate = safe_date(start_year, event_date.month, event_date.day)
         if candidate < today:
-            candidate = safe_date(today.year + 1, event_date.month, event_date.day)
+            candidate = safe_date(candidate.year + 1, event_date.month, event_date.day)
         return candidate
 
     if recurrence == "monthly":
         candidate = safe_date(today.year, today.month, event_date.day)
         if candidate < today:
+            candidate = _add_months(candidate, 1)
+        while candidate < event_date:
             candidate = _add_months(candidate, 1)
         return candidate
 
