@@ -19,6 +19,14 @@ Yearly handles Feb 29 birthdays sanely (falls back to Feb 28 on non-leap years).
 Reminders default to firing 7 days, 1 day, and on-the-day before an event,
 configurable per event via `advance_days`, e.g. `30,7,1,0`.
 
+Each event can also post to its own channel — handy if some events are
+shared (household bins, a joint car) and others are personal (someone's own
+appointments). Pass `channel` on `/event add` or `/event edit` (Discord shows
+a native channel picker); leave it unset and the event falls back to the
+server's default channel from `/event setchannel`. `/event list` shows which
+channel each event is pointed at. Email notifications are still sent as one
+combined summary to everyone in `/event setemails`, regardless of channel.
+
 ## 1. Create the Discord bot
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**.
@@ -62,6 +70,7 @@ Then in Discord:
 /event setemails you@example.com, partner@example.com
 /event add name:"Mum's Birthday" when:1970-03-14 recurrence:yearly
 /event add name:"Car MOT" when:2026-11-02 recurrence:yearly advance_days:30,14,1
+/event add name:"Iris's dentist" when:2026-10-01 recurrence:once channel:#iris-reminders
 /event test event:"Mum's Birthday"
 ```
 

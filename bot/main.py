@@ -47,14 +47,28 @@ def parse_advance_days(value: Optional[str]) -> str:
     return ",".join(str(d) for d in sorted(set(days), reverse=True))
 
 
-def format_event_line(ev: db.Event, occurrence: date) -> str:
+def format_event_line(ev: db.Event, occurrence: date, channel_label: Optional[str] = None) -> str:
     days_until = (occurrence - today()).days
     when = "**today**" if days_until == 0 else f"in **{days_until}** day{'s' if days_until != 1 else ''}"
     icon = {"yearly": "🎉", "monthly": "🔁", "once": "📌"}.get(ev.recurrence, "📅")
     line = f"{icon} **{ev.name}** — {when} ({occurrence.isoformat()})"
     if ev.notes:
         line += f"\n    ↳ {ev.notes}"
+    if channel_label:
+        line += f"\n    📍 {channel_label}"
     return line
+
+
+def resolve_channel_id(ev: db.Event, settings: db.GuildSettings) -> Optional[str]:
+    """An event's own channel overrides the guild's default reminder channel."""
+    return ev.channel_id or settings.reminder_channel_id
+
+
+def channel_label_for(bot_: commands.Bot, channel_id: Optional[str]) -> str:
+    if not channel_id:
+        return "⚠️ no channel configured"
+    channel = bot_.get_channel(int(channel_id))
+    return channel.mention if channel else "⚠️ configured channel not found"
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +101,7 @@ event_group = app_commands.Group(
     recurrence="How it repeats",
     advance_days="Comma-separated days-before to notify, e.g. 7,1,0 (default: 7,1,0)",
     notes="Optional extra detail",
+    channel="Which channel this event's reminders post to (default: the server's default reminder channel)",
 )
 @app_commands.choices(
     recurrence=[app_commands.Choice(name=r, value=r) for r in RECURRENCES]
@@ -98,6 +113,7 @@ async def event_add(
     recurrence: app_commands.Choice[str],
     advance_days: Optional[str] = None,
     notes: Optional[str] = None,
+    channel: Optional[discord.TextChannel] = None,
 ):
     try:
         event_date = parse_date(when)
@@ -114,11 +130,13 @@ async def event_add(
         advance_days=advance_csv,
         notes=notes,
         added_by=interaction.user.id,
+        channel_id=channel.id if channel else None,
     )
     nxt = next_occurrence(event_date, recurrence.value, today())
+    channel_note = f"in {channel.mention}" if channel else "in the server's default reminder channel"
     await interaction.response.send_message(
         f"✅ Added **{name}** (#{event_id}), {recurrence.value}, "
-        f"next on {nxt.isoformat() if nxt else 'n/a'}. "
+        f"next on {nxt.isoformat() if nxt else 'n/a'}, posting {channel_note}. "
         f"Reminders {advance_csv.replace(',', ', ')} day(s) before.",
         ephemeral=True,
     )
@@ -128,6 +146,7 @@ async def event_add(
 @app_commands.describe(days="Only show events happening within this many days (default 120)")
 async def event_list(interaction: discord.Interaction, days: Optional[int] = 120):
     events = await db.get_events(interaction.guild_id)
+    settings = await db.get_guild_settings(interaction.guild_id)
     upcoming = []
     for ev in events:
         nxt = next_occurrence(ev.event_date, ev.recurrence, today())
@@ -143,7 +162,10 @@ async def event_list(interaction: discord.Interaction, days: Optional[int] = 120
         )
         return
 
-    lines = [format_event_line(ev, nxt) for nxt, ev in upcoming]
+    lines = [
+        format_event_line(ev, nxt, channel_label_for(bot, resolve_channel_id(ev, settings)))
+        for nxt, ev in upcoming
+    ]
     embed = discord.Embed(
         title=f"📋 Upcoming events (next {days} days)",
         description="\n".join(lines),
@@ -172,6 +194,8 @@ async def event_remove(interaction: discord.Interaction, event: str):
     recurrence="New recurrence (optional)",
     advance_days="New comma-separated days-before, e.g. 7,1,0 (optional)",
     notes="New notes (optional)",
+    channel="New channel for this event's reminders (optional)",
+    clear_channel="Reset to the server's default reminder channel (optional)",
 )
 @app_commands.choices(
     recurrence=[app_commands.Choice(name=r, value=r) for r in RECURRENCES]
@@ -185,10 +209,18 @@ async def event_edit(
     recurrence: Optional[app_commands.Choice[str]] = None,
     advance_days: Optional[str] = None,
     notes: Optional[str] = None,
+    channel: Optional[discord.TextChannel] = None,
+    clear_channel: Optional[bool] = False,
 ):
     ev = await db.get_event(int(event), interaction.guild_id)
     if not ev:
         await interaction.response.send_message("⚠️ Couldn't find that event.", ephemeral=True)
+        return
+
+    if channel is not None and clear_channel:
+        await interaction.response.send_message(
+            "⚠️ Pick either `channel` or `clear_channel`, not both.", ephemeral=True
+        )
         return
 
     fields = {}
@@ -203,6 +235,10 @@ async def event_edit(
             fields["advance_days"] = parse_advance_days(advance_days)
         if notes is not None:
             fields["notes"] = notes
+        if channel is not None:
+            fields["channel_id"] = str(channel.id)
+        elif clear_channel:
+            fields["channel_id"] = None
     except ValueError as e:
         await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
         return
@@ -254,10 +290,11 @@ async def event_test(interaction: discord.Interaction, event: str):
     nxt = next_occurrence(ev.event_date, ev.recurrence, today())
     line = format_event_line(ev, nxt) if nxt else f"**{ev.name}** has no upcoming occurrence."
     settings = await db.get_guild_settings(interaction.guild_id)
+    chan_id = resolve_channel_id(ev, settings)
 
     results = []
-    if settings.reminder_channel_id:
-        channel = bot.get_channel(int(settings.reminder_channel_id))
+    if chan_id:
+        channel = bot.get_channel(int(chan_id))
         if channel:
             await channel.send(embed=discord.Embed(
                 title="🔔 Test reminder", description=line, color=discord.Color.orange()
@@ -266,7 +303,7 @@ async def event_test(interaction: discord.Interaction, event: str):
         else:
             results.append("⚠️ configured channel not found")
     else:
-        results.append("no reminder channel configured")
+        results.append("no reminder channel configured (set one on the event, or with /event setchannel)")
 
     if settings.email_recipients and config.EMAIL_ENABLED:
         try:
@@ -292,7 +329,9 @@ async def check_reminders() -> None:
         settings = await db.get_guild_settings(guild_id)
         events = await db.get_events(guild_id)
 
-        due: list[tuple[db.Event, date, int]] = []
+        # Due events, grouped by resolved channel (event's own, else guild default;
+        # None groups events where neither is configured).
+        due_by_channel: dict[Optional[str], list[tuple[db.Event, date, int]]] = {}
         for ev in events:
             nxt = next_occurrence(ev.event_date, ev.recurrence, the_day)
             if nxt is None:
@@ -302,25 +341,33 @@ async def check_reminders() -> None:
             advance_list = config.parse_days(ev.advance_days)
             if days_until in advance_list:
                 if await db.record_sent(ev.id, nxt, days_until):
-                    due.append((ev, nxt, days_until))
+                    chan_id = resolve_channel_id(ev, settings)
+                    due_by_channel.setdefault(chan_id, []).append((ev, nxt, days_until))
 
-        if not due:
+        if not due_by_channel:
             continue
 
-        lines = [format_event_line(ev, nxt) for ev, nxt, _ in due]
-        body = "\n".join(lines)
-
-        if settings.reminder_channel_id:
-            channel = bot.get_channel(int(settings.reminder_channel_id))
-            if channel:
-                embed = discord.Embed(title="🔔 Reminders", description=body, color=discord.Color.gold())
-                await channel.send(embed=embed)
+        # Discord: one embed per resolved channel, so events split across
+        # channels (e.g. shared vs. personal) don't all land in one place.
+        for chan_id, due in due_by_channel.items():
+            body = "\n".join(format_event_line(ev, nxt) for ev, nxt, _ in due)
+            if chan_id:
+                channel = bot.get_channel(int(chan_id))
+                if channel:
+                    embed = discord.Embed(title="🔔 Reminders", description=body, color=discord.Color.gold())
+                    await channel.send(embed=embed)
+                else:
+                    log.warning("Guild %s: channel %s no longer exists", guild_id, chan_id)
             else:
-                log.warning("Guild %s has a reminder channel set that no longer exists", guild_id)
-        else:
-            log.warning("Guild %s has due reminders but no channel configured (/event setchannel)", guild_id)
+                log.warning(
+                    "Guild %s has due reminders with no channel configured "
+                    "(set one on the event, or with /event setchannel)", guild_id,
+                )
 
+        # Email stays one-for-all: a single combined summary across every channel.
         if settings.email_recipients and config.EMAIL_ENABLED:
+            all_due = [pair for due in due_by_channel.values() for pair in due]
+            body = "\n".join(format_event_line(ev, nxt) for ev, nxt, _ in all_due)
             try:
                 await notify.send_email("Upcoming reminders", body.replace("**", ""), settings.email_recipients)
             except Exception:

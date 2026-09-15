@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS events (
     notes TEXT,
     added_by TEXT,
     created_at TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    channel_id TEXT              -- overrides guild_settings.reminder_channel_id when set
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -49,6 +50,7 @@ class Event:
     notes: Optional[str]
     added_by: Optional[str]
     active: bool
+    channel_id: Optional[str]
 
     @classmethod
     def from_row(cls, row: aiosqlite.Row) -> "Event":
@@ -62,6 +64,7 @@ class Event:
             notes=row["notes"],
             added_by=row["added_by"],
             active=bool(row["active"]),
+            channel_id=row["channel_id"],
         )
 
 
@@ -80,7 +83,16 @@ async def init() -> None:
     _db = await aiosqlite.connect(config.DB_PATH)
     _db.row_factory = aiosqlite.Row
     await _db.executescript(SCHEMA)
+    await _migrate()
     await _db.commit()
+
+
+async def _migrate() -> None:
+    """Add columns to pre-existing databases that predate them."""
+    cur = await _db.execute("PRAGMA table_info(events)")
+    cols = {row["name"] for row in await cur.fetchall()}
+    if "channel_id" not in cols:
+        await _db.execute("ALTER TABLE events ADD COLUMN channel_id TEXT")
 
 
 def _conn() -> aiosqlite.Connection:
@@ -104,11 +116,12 @@ async def add_event(
     advance_days: str,
     notes: Optional[str],
     added_by: int,
+    channel_id: Optional[int] = None,
 ) -> int:
     cur = await _conn().execute(
         """INSERT INTO events
-           (guild_id, name, event_date, recurrence, advance_days, notes, added_by, created_at, active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+           (guild_id, name, event_date, recurrence, advance_days, notes, added_by, created_at, active, channel_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
         (
             str(guild_id),
             name,
@@ -118,6 +131,7 @@ async def add_event(
             notes,
             str(added_by),
             datetime.utcnow().isoformat(),
+            str(channel_id) if channel_id is not None else None,
         ),
     )
     await _conn().commit()
